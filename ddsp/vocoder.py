@@ -1,20 +1,18 @@
-import os
 import numpy as np
-import yaml
+import numpy as np
+import parselmouth
+import pyworld as pw
 import torch
 import torch.nn.functional as F
-import pyworld as pw
-import parselmouth
 import torchcrepe
-import resampy
-from transformers import HubertModel, Wav2Vec2FeatureExtractor
 from fairseq import checkpoint_utils
-from encoder.hubert.model import HubertSoft
 from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 from torchaudio.transforms import Resample
+from transformers import HubertModel, Wav2Vec2FeatureExtractor
+
+from encoder.hubert.model import HubertSoft
+from .core import MaskedAvgPool1d, MedianPool1d
 from .unit2control import Unit2Control
-from .core import frequency_filter, upsample, remove_above_fmax, MaskedAvgPool1d, MedianPool1d
-import time
 
 CREPE_RESAMPLE_KERNEL = {}
 F0_KERNEL = {}

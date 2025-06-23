@@ -1,18 +1,28 @@
-import os
-import torch
-import librosa
 import argparse
+import hashlib
+import os
+from ast import literal_eval
+
+import librosa
 import numpy as np
 import soundfile as sf
-import pyworld as pw
-import parselmouth
-import hashlib
-from ast import literal_eval
-from slicer import Slicer
-from ddsp.vocoder import F0_Extractor, Volume_Extractor, Units_Encoder
-from ddsp.core import upsample
-from reflow.vocoder import load_model_vocoder
+import torch
 from tqdm import tqdm
+
+from ddsp.core import upsample
+from ddsp.vocoder import F0_Extractor, Volume_Extractor, Units_Encoder
+from reflow.vocoder import load_model_vocoder
+from slicer import Slicer
+
+_original_load = torch.load
+
+
+def unsafe_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return _original_load(*args, **kwargs)
+
+
+torch.load = unsafe_load
 
 def check_args(ddsp_args, diff_args):
     if ddsp_args.data.sampling_rate != diff_args.data.sampling_rate:

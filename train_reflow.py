@@ -1,11 +1,22 @@
-import os
 import argparse
+
 import torch
 from torch.optim import lr_scheduler
-from optimizer.muon import Muon_AdamW
+
 from logger import utils
+from optimizer.muon import Muon_AdamW
 from reflow.data_loaders import get_data_loaders
 from reflow.vocoder import Vocoder, Unit2Wav
+
+_original_load = torch.load
+
+
+def unsafe_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return _original_load(*args, **kwargs)
+
+
+torch.load = unsafe_load
 
 
 def parse_args(args=None, namespace=None):

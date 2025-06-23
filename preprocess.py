@@ -1,18 +1,28 @@
-import os
-import numpy as np
-import random
-import librosa
-import torch
-import pyworld as pw
-import parselmouth
 import argparse
+import os
+import random
 import shutil
-from logger import utils
+
+import librosa
+import numpy as np
+import torch
 from tqdm import tqdm
+
 from ddsp.vocoder import F0_Extractor, Volume_Extractor, Units_Encoder
-from reflow.vocoder import Vocoder
+from logger import utils
 from logger.utils import traverse_dir
-import concurrent.futures
+from reflow.vocoder import Vocoder
+
+_original_load = torch.load
+
+
+def unsafe_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return _original_load(*args, **kwargs)
+
+
+torch.load = unsafe_load
+
 
 def parse_args(args=None, namespace=None):
     """Parse command-line arguments."""

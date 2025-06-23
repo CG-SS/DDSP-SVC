@@ -10,6 +10,16 @@ import time
 from gui_reflow_locale import I18nAuto
 from reflow.vocoder import load_model_vocoder
 
+_original_load = torch.load
+
+
+def unsafe_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return _original_load(*args, **kwargs)
+
+
+torch.load = unsafe_load
+
 flag_vc = False
 
 def phase_vocoder(a, b, fade_out, fade_in):
