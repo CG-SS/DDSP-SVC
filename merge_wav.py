@@ -1,12 +1,13 @@
+#!/usr/bin/env python3
+"""
+Merge all WAV files in a given directory into a single WAV file if they're smaller than a given threshold.
+"""
+
+import argparse
 import os
 import wave
 import contextlib
 from pydub import AudioSegment
-
-# Directory containing the .wav files
-INPUT_DIR = "./wav_files"  # change this as needed
-OUTPUT_FILE = "merged_short.wav"
-THRESHOLD_SECONDS = 2
 
 
 def get_wav_duration(filepath):
@@ -35,6 +36,16 @@ def merge_short_wavs(directory, output_file, threshold_sec=2):
     else:
         print("No files shorter than threshold were found.")
 
+def main():
+    parser = argparse.ArgumentParser(description='Merge WAV files based on a threshold.')
+    parser.add_argument('input_dir', type=str, help='Input directory containing .wav files')
+    parser.add_argument('output', type=str, help='Output file')
+    parser.add_argument('--threshold_seconds', type=float, default=2.0,
+                        help='Segment size to be merged. Any audio size smaller than this will be merged. (default: 2.0)')
+
+    args = parser.parse_args()
+
+    merge_short_wavs(args.input_dir, args.output, args.threshold_seconds)
 
 if __name__ == "__main__":
-    merge_short_wavs(INPUT_DIR, OUTPUT_FILE, THRESHOLD_SECONDS)
+    main()
