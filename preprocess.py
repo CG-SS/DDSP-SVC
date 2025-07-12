@@ -71,7 +71,7 @@ def process_audio_files(src_dir, out_dir, duration, extensions, sr):
             if file_ext in extensions:
                 try:
                     # Load audio file
-                    y, sr = librosa.load(file_path, sr=None)
+                    y, sr = librosa.load(file_path, sr=sr)
 
                     # Calculate samples per chunk
                     samples_per_chunk = int(duration * sr)
