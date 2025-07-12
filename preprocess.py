@@ -45,7 +45,7 @@ def parse_args(args=None, namespace=None):
     return parser.parse_args(args=args, namespace=namespace)
 
 
-def process_audio_files(src_dir, out_dir, duration, extensions):
+def process_audio_files(src_dir, out_dir, duration, extensions, sr):
     """
     Process audio files by filtering by extension, converting to WAV, and splitting into chunks.
 
@@ -103,7 +103,7 @@ def preprocess(src_path, output_path, f0_extractor, volume_extractor, mel_extrac
     path_srcdir  = os.path.join(src_path, 'audio')
 
     audio_output_path = os.path.join(output_path, 'audio')
-    process_audio_files(path_srcdir, audio_output_path, duration, extensions)
+    process_audio_files(path_srcdir, audio_output_path, duration, extensions, sample_rate)
 
     path_unitsdir  = os.path.join(output_path, 'units')
     path_f0dir  = os.path.join(output_path, 'f0')
