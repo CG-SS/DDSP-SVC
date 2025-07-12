@@ -6,7 +6,7 @@ import librosa
 from logger.saver import Saver
 from logger import utils
 from torch import autocast
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 from nsf_hifigan.nvSTFT import STFT
 
 def calculate_mel_snr(gt_mel, pred_mel):
@@ -204,7 +204,7 @@ def train(args, initial_global_step, model, optimizer, scheduler, vocoder, loade
     start_epoch = initial_global_step // num_batches
     model.train()
     saver.log_info('======= start training =======')
-    scaler = GradScaler()
+    scaler = GradScaler('cuda' if torch.cuda.is_available() else 'cpu')
     if args.train.amp_dtype == 'fp32':
         dtype = torch.float32
     elif args.train.amp_dtype == 'fp16':
