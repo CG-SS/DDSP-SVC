@@ -122,7 +122,7 @@ def test(args, model, vocoder, loader_test, saver):
             saver.log_spec(data['name'][0], data['mel'], mel)
             
             # log audio
-            path_audio = os.path.join(args.data.valid_path, 'audio', data['name_ext'][0])
+            path_audio = os.path.join(os.path.join(args.env.expdir, 'val'), 'audio', data['name_ext'][0])
             audio, sr = librosa.load(path_audio, sr=args.data.sampling_rate)
             if len(audio.shape) > 1:
                 audio = librosa.to_mono(audio)

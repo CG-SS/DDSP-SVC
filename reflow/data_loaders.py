@@ -63,7 +63,7 @@ def traverse_dir(
 
 def get_data_loaders(args, whole_audio=False):
     data_train = AudioDataset(
-        args.data.train_path,
+        os.path.join(args.env.expdir, 'train'),
         waveform_sec=args.data.duration,
         hop_size=args.data.block_size,
         sample_rate=args.data.sampling_rate,
@@ -83,7 +83,7 @@ def get_data_loaders(args, whole_audio=False):
         pin_memory=True if args.train.cache_device=='cpu' else False
     )
     data_valid = AudioDataset(
-        args.data.valid_path,
+        os.path.join(args.env.expdir, 'val'),
         waveform_sec=args.data.duration,
         hop_size=args.data.block_size,
         sample_rate=args.data.sampling_rate,

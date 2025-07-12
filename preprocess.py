@@ -7,6 +7,8 @@ import librosa
 import numpy as np
 import torch
 from tqdm import tqdm
+from pathlib import Path
+import soundfile as sf
 
 from ddsp.vocoder import F0_Extractor, Volume_Extractor, Units_Encoder
 from logger import utils
@@ -41,21 +43,79 @@ def parse_args(args=None, namespace=None):
         required=False,
         help="cpu or cuda, auto if not set")
     return parser.parse_args(args=args, namespace=namespace)
-    
-def preprocess(path, f0_extractor, volume_extractor, mel_extractor, units_encoder, sample_rate, hop_size, device = 'cuda', use_pitch_aug = False, extensions = ['wav']):
-    
-    path_srcdir  = os.path.join(path, 'audio')
-    path_unitsdir  = os.path.join(path, 'units')
-    path_f0dir  = os.path.join(path, 'f0')
-    path_volumedir  = os.path.join(path, 'volume')
-    path_augvoldir  = os.path.join(path, 'aug_vol')
-    path_meldir  = os.path.join(path, 'mel')
-    path_augmeldir  = os.path.join(path, 'aug_mel')
-    path_skipdir = os.path.join(path, 'skip')
+
+
+def process_audio_files(src_dir, out_dir, duration, extensions):
+    """
+    Process audio files by filtering by extension, converting to WAV, and splitting into chunks.
+
+    Args:
+        src_dir (str): Input directory containing audio files
+        out_dir (str): Output directory for processed chunks
+        duration (float): Duration of each chunk in seconds
+        extensions (list): List of file extensions to process (e.g., ['.mp3', '.wav', '.flac'])
+    """
+    # Create output directory if it doesn't exist
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
+    # Normalize extensions to lowercase with dots
+    extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}' for ext in extensions]
+
+    # Get all files in source directory
+    for root, dirs, files in os.walk(src_dir):
+        for file in files:
+            file_path = os.path.join(root, file)
+            file_ext = os.path.splitext(file)[1].lower()
+
+            # Check if file extension matches any in the extensions list
+            if file_ext in extensions:
+                try:
+                    # Load audio file
+                    y, sr = librosa.load(file_path, sr=None)
+
+                    # Calculate samples per chunk
+                    samples_per_chunk = int(duration * sr)
+
+                    # Get base filename without extension
+                    base_name = os.path.splitext(os.path.basename(file))[0]
+
+                    # Split audio into chunks
+                    for i, start in enumerate(range(0, len(y), samples_per_chunk)):
+                        end = min(start + samples_per_chunk, len(y))
+                        chunk = y[start:end]
+
+                        # Only save chunks that are at least as long as the specified duration
+                        if len(chunk) >= samples_per_chunk:
+                            # Create output filename
+                            chunk_filename = f"{base_name}_chunk_{i:04d}.wav"
+                            chunk_path = os.path.join(out_dir, chunk_filename)
+
+                            # Save chunk as WAV file
+                            sf.write(chunk_path, chunk, sr)
+
+                except Exception:
+                    # Skip files that can't be processed
+                    print(f"Error processing {file_path}")
+                    continue
+
+def preprocess(src_path, output_path, f0_extractor, volume_extractor, mel_extractor, units_encoder, sample_rate, hop_size, device = 'cuda', use_pitch_aug = False, extensions = ['wav'], duration = 2.0):
+
+    path_srcdir  = os.path.join(src_path, 'audio')
+
+    audio_output_path = os.path.join(output_path, 'audio')
+    process_audio_files(path_srcdir, audio_output_path, duration, extensions)
+
+    path_unitsdir  = os.path.join(output_path, 'units')
+    path_f0dir  = os.path.join(output_path, 'f0')
+    path_volumedir  = os.path.join(output_path, 'volume')
+    path_augvoldir  = os.path.join(output_path, 'aug_vol')
+    path_meldir  = os.path.join(output_path, 'mel')
+    path_augmeldir  = os.path.join(output_path, 'aug_mel')
+    path_skipdir = os.path.join(output_path, 'skip')
     
     # list files
     filelist =  traverse_dir(
-        path_srcdir,
+        audio_output_path,
         extensions=extensions,
         is_pure=True,
         is_sort=True,
@@ -67,7 +127,7 @@ def preprocess(path, f0_extractor, volume_extractor, mel_extractor, units_encode
     # run  
     def process(file):
         binfile = file+'.npy'
-        path_srcfile = os.path.join(path_srcdir, file)
+        path_srcfile = os.path.join(audio_output_path, file)
         path_unitsfile = os.path.join(path_unitsdir, binfile)
         path_f0file = os.path.join(path_f0dir, binfile)
         path_volumefile = os.path.join(path_volumedir, binfile)
@@ -135,14 +195,14 @@ def preprocess(path, f0_extractor, volume_extractor, mel_extractor, units_encode
             os.makedirs(os.path.dirname(path_skipfile), exist_ok=True)
             shutil.move(path_srcfile, os.path.dirname(path_skipfile))
             print('This file has been moved to ' + path_skipfile)
-    print('Preprocess the audio clips in :', path_srcdir)
+    print('Preprocess the audio clips in :', audio_output_path)
     
     # single process
     for file in tqdm(filelist, total=len(filelist)):
         process(file)
     
     if mel_extractor is not None:
-        path_pitchaugdict = os.path.join(path, 'pitch_aug_dict.npy')
+        path_pitchaugdict = os.path.join(output_path, 'pitch_aug_dict.npy')
         np.save(path_pitchaugdict, pitch_aug_dict)
     # multi-process (have bugs)
     '''
@@ -177,7 +237,6 @@ if __name__ == '__main__':
     volume_extractor = Volume_Extractor(args.data.block_size, args.data.volume_smooth_size)
     
     # initialize mel extractor
-    mel_extractor = None
     use_pitch_aug = False
     mel_extractor = Vocoder(args.vocoder.type, args.vocoder.ckpt, device = device)
     if mel_extractor.vocoder_sample_rate != sample_rate or mel_extractor.vocoder_hop_size != hop_size:
@@ -197,11 +256,11 @@ if __name__ == '__main__':
                         args.data.encoder_sample_rate, 
                         args.data.encoder_hop_size,
                         cnhubertsoft_gate=cnhubertsoft_gate,
-                        device = device)    
+                        device = device)
     
     # preprocess training set
-    preprocess(args.data.train_path, f0_extractor, volume_extractor, mel_extractor, units_encoder, sample_rate, hop_size, device = device, use_pitch_aug = use_pitch_aug, extensions = extensions)
+    preprocess(args.data.train_path, os.path.join(args.env.expdir, 'train'), f0_extractor, volume_extractor, mel_extractor, units_encoder, sample_rate, hop_size, device = device, use_pitch_aug = use_pitch_aug, extensions = extensions, duration = args.data.duration)
     
     # preprocess validation set
-    preprocess(args.data.valid_path, f0_extractor, volume_extractor, mel_extractor, units_encoder, sample_rate, hop_size, device = device, use_pitch_aug = False, extensions = extensions)
+    preprocess(args.data.valid_path, os.path.join(args.env.expdir, 'val'), f0_extractor, volume_extractor, mel_extractor, units_encoder, sample_rate, hop_size, device = device, use_pitch_aug = False, extensions = extensions, duration = args.data.duration)
     
