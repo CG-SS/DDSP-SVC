@@ -373,4 +373,6 @@ if __name__ == '__main__':
     
     # preprocess validation set
     preprocess(os.path.join(args.env.expdir, 'val'), f0_extractor, volume_extractor, mel_extractor, units_encoder, sample_rate, hop_size, device = device, use_pitch_aug = False, extensions = extensions)
+
+    print('Finished preprocessing.')
     
