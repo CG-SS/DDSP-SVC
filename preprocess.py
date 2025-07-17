@@ -15,6 +15,9 @@ from logger import utils
 from logger.utils import traverse_dir
 from reflow.vocoder import Vocoder
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+
 from typing import List, Tuple
 
 _original_load = torch.load
@@ -126,10 +129,83 @@ def split_data(src_dir, exp_dir, split_ratio):
             shutil.copyfile(os.path.join(root, file), os.path.join(train_path, spkr_emb_path, file))
 
 
-def process_audio_files(src_dir, out_dir, duration, extensions, sr, silence_thresh):
+def process_single_file(file_info, src_dir, out_dir, duration, sr, silence_thresh, file_counter_lock, file_counter):
+    """
+    Process a single audio file.
+
+    Args:
+        file_info (tuple): (root, file) tuple from os.walk
+        src_dir (str): Source directory
+        out_dir (str): Output directory
+        duration (float): Duration of each chunk in seconds
+        sr (int): Sample rate
+        silence_thresh (float): Silence threshold
+        file_counter_lock (Lock): Thread lock for file counter
+        file_counter (dict): Shared counter dictionary
+
+    Returns:
+        dict: Processing metrics for this file
+    """
+    root, file = file_info
+    file_path = os.path.join(root, file)
+    spkr_emb_path = root[len(src_dir) + 1:]
+
+    metrics = {
+        'parsed': 0,
+        'skipped_silence': 0,
+        'failed': 0,
+        'total_chunks': 0
+    }
+
+    try:
+        # Load audio file
+        y, sr_loaded = librosa.load(file_path, sr=sr, mono=True)
+
+        # Get file number atomically
+        with file_counter_lock:
+            file_n = file_counter['count']
+            file_counter['count'] += 1
+
+        # Calculate samples per chunk
+        samples_per_chunk = int(duration * sr)
+
+        # Split audio into chunks
+        for i, start in enumerate(range(0, len(y), samples_per_chunk)):
+            end = min(start + samples_per_chunk, len(y))
+            chunk = y[start:end]
+
+            metrics['total_chunks'] += 1
+
+            # Only save chunks that are at least as long as the specified duration
+            if len(chunk) >= samples_per_chunk:
+                # Calculate RMS (Root Mean Square) to detect silence
+                rms = np.sqrt(np.mean(chunk ** 2))
+
+                # Check if chunk passes silence threshold
+                if rms > silence_thresh:
+                    # Create output filename
+                    chunk_filename = f"{file_n}_{i:09d}.flac"
+                    chunk_path = os.path.join(out_dir, spkr_emb_path, chunk_filename)
+
+                    # Save chunk as FLAC file
+                    sf.write(chunk_path, chunk, sr, format='FLAC')
+                else:
+                    metrics['skipped_silence'] += 1
+
+        metrics['parsed'] = 1
+
+    except Exception as e:
+        # Skip files that can't be processed
+        print(f"Error processing {file_path}: {e}")
+        metrics['failed'] = 1
+
+    return metrics
+
+
+def process_audio_files(src_dir, out_dir, duration, extensions, sr, silence_thresh, n_workers=4):
     """
     Process audio files by filtering by extension, converting to WAV, and splitting into chunks.
-    Chunks are only saved if they exceed the silence threshold.
+    Chunks are only saved if they exceed the silence threshold. Files are processed concurrently.
 
     Args:
         src_dir (str): Input directory containing audio files
@@ -138,6 +214,7 @@ def process_audio_files(src_dir, out_dir, duration, extensions, sr, silence_thre
         extensions (list): List of file extensions to process (e.g., ['.mp3', '.wav', '.flac'])
         sr (int): Sample rate for audio processing
         silence_thresh (float): Threshold for silence detection. Chunks with RMS below this value are skipped.
+        n_workers (int): Number of concurrent workers for processing files (default: 4)
 
     Returns:
         dict: Dictionary containing metrics:
@@ -152,7 +229,8 @@ def process_audio_files(src_dir, out_dir, duration, extensions, sr, silence_thre
     # Normalize extensions to lowercase with dots
     extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}' for ext in extensions]
 
-    file_n = 0
+    # Collect all files to process
+    files_to_process = []
 
     # Get all files in source directory
     for root, _, files in os.walk(src_dir):
@@ -161,44 +239,55 @@ def process_audio_files(src_dir, out_dir, duration, extensions, sr, silence_thre
             Path(os.path.join(out_dir, spkr_emb_path)).mkdir(parents=True, exist_ok=True)
 
         for file in files:
-            file_path = os.path.join(root, file)
             file_ext = os.path.splitext(file)[1].lower()
 
             # Check if file extension matches any in the extensions list
             if file_ext in extensions:
-                try:
-                    # Load audio file
-                    y, sr = librosa.load(file_path, sr=sr, mono=True)
+                files_to_process.append((root, file))
 
-                    # Calculate samples per chunk
-                    samples_per_chunk = int(duration * sr)
+    # Initialize metrics
+    total_metrics = {
+        'parsed_files': 0,
+        'skipped_silence': 0,
+        'failed_parse': 0,
+        'total_chunks': 0
+    }
 
-                    # Split audio into chunks
-                    for i, start in enumerate(range(0, len(y), samples_per_chunk)):
-                        end = min(start + samples_per_chunk, len(y))
-                        chunk = y[start:end]
+    # Shared file counter with lock
+    file_counter = {'count': 0}
+    file_counter_lock = Lock()
 
-                        # Only save chunks that are at least as long as the specified duration
-                        if len(chunk) >= samples_per_chunk:
-                            # Calculate RMS (Root Mean Square) to detect silence
-                            rms = np.sqrt(np.mean(chunk ** 2))
+    # Process files concurrently
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        # Submit all tasks
+        future_to_file = {
+            executor.submit(
+                process_single_file,
+                file_info,
+                src_dir,
+                out_dir,
+                duration,
+                sr,
+                silence_thresh,
+                file_counter_lock,
+                file_counter
+            ): file_info for file_info in files_to_process
+        }
 
-                            # Check if chunk passes silence threshold
-                            if rms > silence_thresh:
-                                # Create output filename
-                                chunk_filename = f"{file_n}_{i:09d}.flac"
-                                chunk_path = os.path.join(out_dir, spkr_emb_path, chunk_filename)
+        # Process completed tasks
+        for future in as_completed(future_to_file):
+            file_info = future_to_file[future]
+            try:
+                metrics = future.result()
+                total_metrics['parsed_files'] += metrics['parsed']
+                total_metrics['skipped_silence'] += metrics['skipped_silence']
+                total_metrics['failed_parse'] += metrics['failed']
+                total_metrics['total_chunks'] += metrics['total_chunks']
+            except Exception as e:
+                print(f"Error processing {file_info}: {e}")
+                total_metrics['failed_parse'] += 1
 
-                                # Save chunk as WAV file
-                                sf.write(chunk_path, chunk, sr, format='FLAC')
-
-                    file_n += 1
-
-                except Exception as e:
-                    # Skip files that can't be processed
-                    print(f"Error processing {file_path}: {e}")
-
-                    continue
+    return total_metrics
 
 def preprocess(output_path, f0_extractor, volume_extractor, mel_extractor, units_encoder, sample_rate, hop_size, device = 'cuda', use_pitch_aug = False, extensions = ['wav']):
 
@@ -363,10 +452,20 @@ if __name__ == '__main__':
     exp_dir = args.env.expdir
 
     audio_chunks_path = os.path.join(exp_dir, 'audio_chunks')
+    duration = args.data.duration
+    n_workers = args.data.n_workers
 
-    process_audio_files(data_path, audio_chunks_path, args.data.duration, extensions, sample_rate, silence_threshold)
+    print('Starting splitting files into chunks...')
+
+    audio_chunks_metrics = process_audio_files(data_path, audio_chunks_path, duration, extensions, sample_rate, silence_threshold)
+
+    print(f'Finished splitting files: {audio_chunks_metrics}')
+
+    print(f'Separating {split_ratio} samples for training...')
 
     split_data(audio_chunks_path, exp_dir, split_ratio)
+
+    print('Finished separating files.')
 
     # preprocess training set
     preprocess(os.path.join(args.env.expdir, 'train'), f0_extractor, volume_extractor, mel_extractor, units_encoder, sample_rate, hop_size, device = device, use_pitch_aug = use_pitch_aug, extensions = extensions)
