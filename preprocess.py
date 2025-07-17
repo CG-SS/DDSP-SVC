@@ -457,7 +457,7 @@ if __name__ == '__main__':
 
     print('Starting splitting files into chunks...')
 
-    audio_chunks_metrics = process_audio_files(data_path, audio_chunks_path, duration, extensions, sample_rate, silence_threshold)
+    audio_chunks_metrics = process_audio_files(data_path, audio_chunks_path, duration, extensions, sample_rate, silence_threshold, n_workers)
 
     print(f'Finished splitting files: {audio_chunks_metrics}')
 
